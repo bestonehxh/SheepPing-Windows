@@ -1,4 +1,4 @@
-﻿/// The two modal sheets, ported from `AddHostSheet` and `SettingsSheet`.
+/// The two modal sheets, ported from `AddHostSheet` and `SettingsSheet`.
 ///
 /// Presentation mimics macOS: the panel drops in from the title bar over a dim
 /// window, is not dismissed by clicking outside, and closes on Escape.
@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:macos_ui/macos_ui.dart'
     show MacosSlider, MacosTheme, MacosThemeData;
-
 
 import '../theme.dart';
 import '../view_model.dart';
@@ -32,29 +31,30 @@ Future<T?> _showSheet<T>(BuildContext context, Widget sheet) {
     barrierColor: Colors.black.withValues(alpha: 0.25),
     transitionDuration: const Duration(milliseconds: 200),
     pageBuilder: (BuildContext ctx, _, __) => sheet,
-    transitionBuilder: (BuildContext ctx, Animation<double> animation, _, Widget child) {
-      final curved = CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOutCubic,
-        reverseCurve: Curves.easeInCubic,
-      );
-      final dark = Theme.of(ctx).brightness == Brightness.dark;
-      return FadeTransition(
-        opacity: curved,
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, -0.04),
-            end: Offset.zero,
-          ).animate(curved),
-          // The route sits above HomeShell, so it needs its own MacosTheme for
-          // the macos_ui controls inside the sheet.
-          child: MacosTheme(
-            data: dark ? MacosThemeData.dark() : MacosThemeData.light(),
-            child: child,
-          ),
-        ),
-      );
-    },
+    transitionBuilder:
+        (BuildContext ctx, Animation<double> animation, _, Widget child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          final dark = Theme.of(ctx).brightness == Brightness.dark;
+          return FadeTransition(
+            opacity: curved,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, -0.04),
+                end: Offset.zero,
+              ).animate(curved),
+              // The route sits above HomeShell, so it needs its own MacosTheme for
+              // the macos_ui controls inside the sheet.
+              child: MacosTheme(
+                data: dark ? MacosThemeData.dark() : MacosThemeData.light(),
+                child: child,
+              ),
+            ),
+          );
+        },
   );
 }
 
@@ -118,7 +118,11 @@ class _SheetFrame extends StatelessWidget {
                       Flexible(
                         child: SingleChildScrollView(
                           padding: EdgeInsets.fromLTRB(
-                              24, 24, 24, footer == null ? 24 : 16),
+                            24,
+                            24,
+                            24,
+                            footer == null ? 24 : 16,
+                          ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -164,16 +168,7 @@ class _SheetTitle extends StatelessWidget {
       children: <Widget>[
         Icon(icon, size: 18, color: p.accent),
         const SizedBox(width: 8),
-        Text(
-          label,
-          style: TextStyle(
-            fontFamily: uiFontFamily,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: p.text,
-            letterSpacing: -0.3,
-          ),
-        ),
+        Text(label, style: AppText.title2.copyWith(color: p.text)),
       ],
     );
   }
@@ -213,10 +208,8 @@ class _AddHostSheetState extends State<_AddHostSheet> {
 
   void _submit() {
     if (_isEmpty) return;
-    for (final line in _controller.text.split('\n')) {
-      final address = line.trim();
-      if (address.isNotEmpty) widget.vm.addHost(address);
-    }
+    // One save for the whole paste, not one settings write per line.
+    widget.vm.addHosts(_controller.text.split(RegExp(r'\r?\n')));
     widget.onAdded();
   }
 
@@ -245,17 +238,28 @@ class _AddHostSheetState extends State<_AddHostSheet> {
               bindings: <ShortcutActivator, VoidCallback>{
                 const SingleActivator(LogicalKeyboardKey.enter, control: true):
                     _submit,
+                const SingleActivator(
+                  LogicalKeyboardKey.numpadEnter,
+                  control: true,
+                ): _submit,
               },
               child: TextField(
                 controller: _controller,
                 focusNode: _focus,
+                // Fill the box and scroll inside it: with only maxLines: null
+                // a long paste grew the field past its 132 px frame.
                 maxLines: null,
-                minLines: 3,
+                expands: true,
+                textAlignVertical: TextAlignVertical.top,
                 cursorColor: p.accent,
                 style: AppText.mono.copyWith(color: p.text),
-                decoration: const InputDecoration(
+                // The macOS sheet shows its examples inside the empty editor.
+                decoration: InputDecoration(
                   border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(
+                  hintText: '8.8.8.8\ngoogle.com\n2606:4700:4700::1111',
+                  hintMaxLines: 3,
+                  hintStyle: AppText.mono.copyWith(color: p.tertiary),
+                  contentPadding: const EdgeInsets.symmetric(
                     horizontal: 13,
                     vertical: 10,
                   ),
@@ -266,19 +270,15 @@ class _AddHostSheetState extends State<_AddHostSheet> {
         ),
         const SizedBox(height: 12),
         Text(
-          'One host per line â€” e.g. 8.8.8.8, google.com or 2606:4700:4700::1111. '
-          'IP addresses and hostnames are both supported, and DNS is resolved '
-          'automatically. Press Ctrl+Enter to add.',
+          'One host per line — IP addresses and hostnames are both '
+          'supported. DNS is resolved automatically. Press Ctrl+Enter to add.',
           style: AppText.caption.copyWith(color: p.secondary),
         ),
       ],
       footer: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: <Widget>[
-          _SheetButton(
-            label: 'Cancel',
-            onPressed: widget.onAdded,
-          ),
+          _SheetButton(label: 'Cancel', onPressed: widget.onAdded),
           const SizedBox(width: 10),
           _SheetButton(
             label: 'Add',
@@ -334,11 +334,11 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 value: _intervalDraft,
                 min: PingViewModel.minInterval,
                 max: PingViewModel.maxInterval,
-                onChanged: (double v) =>
-                    setState(() => _intervalDraft = _snap(v).clamp(
-                          PingViewModel.minInterval,
-                          PingViewModel.maxInterval,
-                        )),
+                onChanged: (double v) => setState(
+                  () => _intervalDraft = _snap(
+                    v,
+                  ).clamp(PingViewModel.minInterval, PingViewModel.maxInterval),
+                ),
                 onCommit: () => widget.vm.applyInterval(_intervalDraft),
               ),
               const SizedBox(height: 2),
@@ -369,11 +369,12 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 value: _timeoutDraft,
                 min: PingViewModel.minPingTimeout,
                 max: PingViewModel.maxPingTimeout,
-                onChanged: (double v) =>
-                    setState(() => _timeoutDraft = _snap(v).clamp(
-                          PingViewModel.minPingTimeout,
-                          PingViewModel.maxPingTimeout,
-                        )),
+                onChanged: (double v) => setState(
+                  () => _timeoutDraft = _snap(v).clamp(
+                    PingViewModel.minPingTimeout,
+                    PingViewModel.maxPingTimeout,
+                  ),
+                ),
                 onCommit: () => widget.vm.applyTimeout(_timeoutDraft),
               ),
               const SizedBox(height: 2),
@@ -386,7 +387,11 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Icon(Icons.warning_amber_rounded, size: 13, color: p.orange),
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 13,
+                      color: p.orange,
+                    ),
                     const SizedBox(width: 5),
                     Expanded(
                       child: Text(
@@ -504,15 +509,7 @@ class _ValueRow extends StatelessWidget {
           ),
         ),
         if (value != null)
-          Text(
-            value!,
-            style: TextStyle(
-              fontFamily: uiFontFamily,
-              fontSize: 17,
-              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
-              color: p.text,
-            ),
-          ),
+          Text(value!, style: AppText.title3.copyWith(color: p.text)),
       ],
     );
   }
@@ -609,8 +606,9 @@ class _SheetButton extends StatelessWidget {
     final Color background = prominent
         ? p.accent
         : (p.isDark ? const Color(0xFF4A4A4C) : Colors.white);
-    final Color foreground =
-        prominent ? Colors.white : (p.isDark ? p.text : p.text);
+    final Color foreground = prominent
+        ? Colors.white
+        : (p.isDark ? p.text : p.text);
 
     return Opacity(
       opacity: enabled ? 1 : 0.4,

@@ -6,16 +6,24 @@ log pane 3 โหมด, สถานะ/สีเดียวกัน แล�
 
 ต้นฉบับ: <https://github.com/bestonehxh/SheepPing> (MIT)
 
+## ดาวน์โหลด
+
+**[SheepPing สำหรับ Windows — เวอร์ชันล่าสุด](https://github.com/bestonehxh/SheepPing-Windows/releases/latest)**
+· หรือที่ <https://sheepterm.com/sheepping/>
+
+แตกไฟล์ zip แล้วเปิด `SheepPing.exe` ได้เลย ไม่ต้องติดตั้ง (Windows 10/11 x64)
+แอปยังไม่ได้ลงลายเซ็นดิจิทัล ครั้งแรก SmartScreen อาจเตือน → กด **More info → Run anyway**
+
 ---
 
 ## ฟีเจอร์
 
 | | |
 |---|---|
-| Ping หลาย host พร้อมกัน | หนึ่ง session ต่อ host, ยิง `ping -n 1` ตาม interval ที่ตั้งไว้ |
+| Ping หลาย host พร้อมกัน | หนึ่ง session ต่อ host, ส่ง ICMP echo ผ่าน Windows ICMP API (`IcmpSendEcho2`) ตาม interval — ไม่เรียก `ping.exe` |
 | ตาราง | HOST · RESOLVED IP · STATUS · LATENCY · SUCCESS · FAILED · RATE |
 | สถานะ | จุดสี (Idle / กำลังวิ่งมีวงเต้น / OK / Fail) + capsule "OK" |
-| Log ต่อ host | เก็บสูงสุด 500 บรรทัด, เวลา, latency, ข้อความจาก `ping.exe` |
+| Log ต่อ host | เก็บสูงสุด 500 บรรทัด, เวลา, latency, ข้อความภาษาอังกฤษรูปแบบเดียวกับ `ping.exe` |
 | Log 3 โหมด | ยังไม่เลือก host / เลือก 1 host / เลือกหลาย host |
 | Export | Copy / Save เป็น CSV (ตรงกับต้นฉบับ macOS ทุกคอลัมน์) |
 | เลือกหลายแถว | Click, Ctrl+Click, Shift+Click, Ctrl+A |
@@ -51,7 +59,7 @@ flutter run -d windows
 
 # สร้างไฟล์แจกจ่าย
 flutter build windows --release
-# ได้ที่ build\windows\x64\runner\Release\sheepping.exe
+# ได้ที่ build\windows\x64\runner\Release\SheepPing.exe
 ```
 
 > ถ้า `flutter build windows` ฟ้อง *"Unable to find suitable Visual Studio toolchain"*
@@ -60,7 +68,7 @@ flutter build windows --release
 ## ทดสอบ
 
 ```powershell
-flutter test          # unit test: parser ของ ping, CSV, ชื่อไฟล์
+flutter test test\sheepping_test.dart   # unit test + ping loopback จริงผ่าน ICMP API (บน Windows)
 ```
 
 ภาพหน้าจอสำหรับรีวิว UI (ไม่ใช้ assertion, รันเมื่อต้องการเท่านั้น):
@@ -77,13 +85,15 @@ lib/
   main.dart              MaterialApp + MacosTheme, title bar, splitter, คีย์ลัด
   src/
     models.dart          PingHost (ChangeNotifier), PingStatus, LogEntry
-    ping_engine.dart     ping 1 ครั้งต่อ tick + parser ข้อความ ping.exe
+    ping_engine.dart     session ต่อ host, DNS (cache 1 นาที), ข้อความแบบ ping.exe
+    icmp.dart            IcmpSendEcho2 / Icmp6SendEcho2 ผ่าน dart:ffi (async, poll event ทุก 10 ms)
     view_model.dart      สถานะแอป, session, การเลือก, การบันทึกค่า
     store.dart           settings.json
     theme.dart           สี/ฟอนต์ของ macOS (ใช้ชุดสี dark เท่านั้น)
     export.dart          CSV (ping row / log / หลาย host)
     save_panel.dart      Save dialog ผ่าน GetSaveFileNameW (dart:ffi)
-    win32_window.dart    ถอด title bar, มุมโค้ง, ลากหน้าต่าง, ปุ่มย่อ/ขยาย/ปิด
+    win32_window.dart    มุมโค้ง, ลาก/ย่อขยายขอบบน, ปุ่มย่อ/ขยาย/ปิด
+                         (การถอด caption + ขอบบนทำใน windows/runner ผ่าน WM_NCCALCSIZE)
     widgets/             title_bar, host_table, log_panel, sheets
 ```
 
@@ -91,11 +101,12 @@ lib/
 
 | macOS | พอร์ตนี้ | เหตุผล |
 |---|---|---|
-| SF Pro / SF Mono | Segoe UI / Cascadia Mono (fallback Consolas) | ฟอนต์ Apple แจกจ่ายไม่ได้ |
+| SF Pro / SF Mono | Inter / Roboto Mono (ฝังในแอป) | ฟอนต์ Apple แจกจ่ายไม่ได้ — Inter/Roboto Mono ใกล้ SF ที่สุด (SIL OFL / Apache 2.0) |
 | SF Symbols | Material Icons | license ของ SF Symbols จำกัดการใช้งาน |
-| ไฟจราจรซ้ายบน + toolbar ระบบ | title bar วาดเอง: toolbar ชิดซ้าย + ปุ่มย่อ/ขยาย/ปิดเป็น bar แยกชิดขวา | Windows ไม่มี traffic lights |
+| ไฟจราจรซ้ายบน + toolbar ระบบ | title bar วาดเอง: ชื่อแอปซ้าย, toolbar เป็นแคปซูลแยกกลุ่มแบบ macOS 26, ปุ่มย่อ/ขยาย/ปิดแบบ Windows 11 ชิดขวาบน | Windows ไม่มี traffic lights |
 | ธีมตามระบบ (System/Light/Dark) | dark อย่างเดียว | ตาราง/log ออกแบบมาบนชุดสีเดียว |
-| one long-lived `ping -i` | `ping -n 1` ทุก tick | `ping.exe` ไม่มี `-i` และ `-t` คุมจังหวะไม่ได้ |
+| one long-lived `ping -i` | ICMP API แบบ async ทุก tick (ไม่สร้าง process) | `ping.exe` ไม่มี `-i`, สร้าง process ทุก tick และข้อความเปลี่ยนตามภาษาของ Windows |
+| ภาษาตามระบบ | ภาษาอังกฤษอย่างเดียว (รวม log, ข้อความ error และ Save dialog) | ข้อความทุกบรรทัดแอปเขียนเอง ไม่ใช้ข้อความจาก OS |
 | `NSSavePanel` | `GetSaveFileNameW` | dialog มาตรฐานของ Windows |
 | `UserDefaults` | `%APPDATA%\SheepPing\settings.json` | อ่าน/แก้ไขง่าย |
 

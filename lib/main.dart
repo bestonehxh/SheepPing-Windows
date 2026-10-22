@@ -1,4 +1,4 @@
-﻿/// SheepPing â€” a Windows port of the macOS ping monitor by bestonehxh.
+/// SheepPing — a Windows port of the macOS ping monitor by bestonehxh.
 ///
 /// The window is deliberately drawn without system chrome: [TitleBar] rebuilds
 /// the macOS unified toolbar (icon-only segmented group + "N active" chip), and
@@ -35,41 +35,40 @@ class SheepPingApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: vm,
-      builder: (BuildContext context, Widget? _) {
-        return MaterialApp(
-          title: 'SheepPing',
-          debugShowCheckedModeBanner: false,
-          // Night mode only: the table and log are designed against a single
-          // dark palette, so there is no light scheme to switch to.
-          themeMode: ThemeMode.dark,
-          darkTheme: _materialTheme(darkPalette),
-          theme: _materialTheme(darkPalette),
-          home: Builder(
-            builder: (BuildContext ctx) {
-              return MacosTheme(
-                data: MacosThemeData.dark(),
-                child: HomeShell(vm: vm),
-              );
-            },
-          ),
-        );
-      },
+    // The app shell is built once; HomeShell listens to the view model. This
+    // used to wrap MaterialApp itself, rebuilding the app and its theme on
+    // every selection click.
+    return MaterialApp(
+      title: 'SheepPing',
+      debugShowCheckedModeBanner: false,
+      // English only, whatever the Windows display language.
+      locale: const Locale('en', 'US'),
+      supportedLocales: const <Locale>[Locale('en', 'US')],
+      // Night mode only: the table and log are designed against a single
+      // dark palette, so there is no light scheme to switch to.
+      themeMode: ThemeMode.dark,
+      darkTheme: _theme,
+      theme: _theme,
+      home: MacosTheme(
+        data: MacosThemeData.dark(),
+        child: HomeShell(vm: vm),
+      ),
     );
   }
 
-  /// Material only provides scaffolding here â€” every visible pixel comes from
+  /// Material only provides scaffolding here — every visible pixel comes from
   /// the palette, so the Material theme just needs to agree on brightness,
   /// fonts and selection colour.
+  static final ThemeData _theme = _materialTheme(darkPalette);
+
   static ThemeData _materialTheme(Palette p) {
-    final Brightness brightness =
-        p.isDark ? Brightness.dark : Brightness.light;
+    final Brightness brightness = p.isDark ? Brightness.dark : Brightness.light;
 
     return ThemeData(
       useMaterial3: true,
       brightness: brightness,
       fontFamily: uiFontFamily,
+      fontFamilyFallback: uiFallback,
       scaffoldBackgroundColor: p.window,
       canvasColor: p.window,
       splashFactory: NoSplash.splashFactory,
@@ -86,6 +85,15 @@ class SheepPingApp extends StatelessWidget {
       dialogTheme: DialogThemeData(
         backgroundColor: p.window,
         surfaceTintColor: Colors.transparent,
+      ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: const Color(0xFF3A3A3C),
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: p.separator),
+        ),
+        textStyle: AppText.caption.copyWith(color: p.text),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       ),
       scrollbarTheme: ScrollbarThemeData(
         thickness: WidgetStateProperty.all(6),
@@ -129,6 +137,10 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(listenable: vm, builder: _build);
+  }
+
+  Widget _build(BuildContext context, Widget? _) {
     final Palette p = context.palette;
 
     return CallbackShortcuts(
@@ -138,7 +150,8 @@ class _HomeShellState extends State<HomeShell> {
         const SingleActivator(LogicalKeyboardKey.keyA, control: true): () {
           if (vm.hosts.isNotEmpty) vm.selectAll();
         },
-        const SingleActivator(LogicalKeyboardKey.keyC, control: true): _copyRows,
+        const SingleActivator(LogicalKeyboardKey.keyC, control: true):
+            _copyRows,
         const SingleActivator(LogicalKeyboardKey.escape): vm.clearSelection,
       },
       child: Focus(
@@ -147,56 +160,65 @@ class _HomeShellState extends State<HomeShell> {
           // Text renders a "missing Material ancestor" underline without this.
           type: MaterialType.transparency,
           child: ColoredBox(
-          color: p.window,
-          child: Column(
-            children: <Widget>[
-              TitleBar(
-                anyActive: vm.anyActive,
-                anyInactive: vm.anyInactive,
-                sessionCount: vm.sessionCount,
-                hasHosts: vm.hosts.isNotEmpty,
-                hasSelection: vm.selectedIDs.isNotEmpty,
-                onAdd: () => showAddHostSheet(context, vm),
-                onRemove: _removeSelected,
-                onStopAll: vm.stopAll,
-                onResume: vm.resumeAll,
-                onRestart: vm.restartAll,
-                onSettings: () => showSettingsSheet(context, vm),
-              ),
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (BuildContext context, BoxConstraints c) {
-                    final double maxLog =
-                        (c.maxHeight - _minTable).clamp(_minLog, c.maxHeight);
-                    final double logHeight = _logHeight.clamp(_minLog, maxLog);
-
-                    return Column(
-                      children: <Widget>[
-                        Expanded(child: HostTable(hosts: vm.hosts, vm: vm)),
-                        _Splitter(
-                          palette: p,
-                          onDrag: (double dy) {
-                            setState(() {
-                              _logHeight = (_logHeight - dy).clamp(
-                                _minLog,
-                                (c.maxHeight - _minTable)
-                                    .clamp(_minLog, c.maxHeight),
-                              );
-                            });
-                          },
-                          height: _splitterHit,
-                        ),
-                        SizedBox(
-                          height: logHeight,
-                          child: LogSection(vm: vm),
-                        ),
-                      ],
-                    );
-                  },
+            color: p.window,
+            child: Column(
+              children: <Widget>[
+                TitleBar(
+                  anyActive: vm.anyActive,
+                  anyInactive: vm.anyInactive,
+                  sessionCount: vm.sessionCount,
+                  hasHosts: vm.hosts.isNotEmpty,
+                  hasSelection: vm.selectedIDs.isNotEmpty,
+                  onAdd: () => showAddHostSheet(context, vm),
+                  onRemove: _removeSelected,
+                  onStopAll: vm.stopAll,
+                  onResume: vm.resumeAll,
+                  onRestart: vm.restartAll,
+                  onSettings: () => showSettingsSheet(context, vm),
                 ),
-              ),
-            ],
-          ),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (BuildContext context, BoxConstraints c) {
+                      final double maxLog = (c.maxHeight - _minTable).clamp(
+                        _minLog,
+                        c.maxHeight,
+                      );
+                      final double logHeight = _logHeight.clamp(
+                        _minLog,
+                        maxLog,
+                      );
+
+                      return Column(
+                        children: <Widget>[
+                          Expanded(
+                            child: HostTable(hosts: vm.hosts, vm: vm),
+                          ),
+                          _Splitter(
+                            palette: p,
+                            onDrag: (double dy) {
+                              setState(() {
+                                _logHeight = (_logHeight - dy).clamp(
+                                  _minLog,
+                                  (c.maxHeight - _minTable).clamp(
+                                    _minLog,
+                                    c.maxHeight,
+                                  ),
+                                );
+                              });
+                            },
+                            height: _splitterHit,
+                          ),
+                          SizedBox(
+                            height: logHeight,
+                            child: LogSection(vm: vm),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -238,15 +260,14 @@ class _SplitterState extends State<_Splitter> {
         onVerticalDragStart: (_) => setState(() => _dragging = true),
         onVerticalDragEnd: (_) => setState(() => _dragging = false),
         onVerticalDragCancel: () => setState(() => _dragging = false),
-        onVerticalDragUpdate: (DragUpdateDetails d) => widget.onDrag(d.delta.dy),
+        onVerticalDragUpdate: (DragUpdateDetails d) =>
+            widget.onDrag(d.delta.dy),
         child: SizedBox(
           height: widget.height,
           child: Center(
             child: Container(
               height: 1,
-              color: hot
-                  ? p.accent.withValues(alpha: 0.7)
-                  : p.separator,
+              color: hot ? p.accent.withValues(alpha: 0.7) : p.separator,
             ),
           ),
         ),

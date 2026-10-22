@@ -13,20 +13,24 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'export.dart' show SaveFailure, csvFileContents;
+
+import 'win32_window.dart' show windowHandle;
+
 final DynamicLibrary _comdlg32 = DynamicLibrary.open('comdlg32.dll');
 
 typedef _GetSaveFileNameWC = Int32 Function(Pointer<Uint8>);
 typedef _GetSaveFileNameWD = int Function(Pointer<Uint8>);
 
-final _GetSaveFileNameWD _getSaveFileNameW =
-    _comdlg32.lookupFunction<_GetSaveFileNameWC, _GetSaveFileNameWD>(
-        'GetSaveFileNameW');
+final _GetSaveFileNameWD _getSaveFileNameW = _comdlg32
+    .lookupFunction<_GetSaveFileNameWC, _GetSaveFileNameWD>('GetSaveFileNameW');
 
 // OPENFILENAMEW is 152 bytes on x64. Field offsets are used directly because
 // the struct has a dozen pointer-sized members whose Dart `Struct` mirror would
 // be far longer than the handful of values actually needed here.
 const int _size = 152;
 const int _oStructSize = 0;
+const int _oOwner = 8;
 const int _oFilter = 24;
 const int _oFilterIndex = 44;
 const int _oFile = 48;
@@ -57,13 +61,20 @@ String? saveFileDialog({
   final buffer = calloc<Uint8>(_size);
   try {
     // Double-null terminated filter: "CSV file\0*.csv\0All files\0*.*\0\0".
-    _writeUtf16(filter, '$filterLabel\u0000*.$extension\u0000All files\u0000*.*\u0000\u0000');
+    _writeUtf16(
+      filter,
+      '$filterLabel\u0000*.$extension\u0000All files\u0000*.*\u0000\u0000',
+    );
     _writeUtf16(titlePtr, '$title\u0000');
     _writeUtf16(extPtr, '$extension\u0000');
     _writeUtf16(fileBuf.cast<Uint8>(), suggestedName);
 
     final bd = ByteData.sublistView(buffer.asTypedList(_size));
     bd.setUint32(_oStructSize, _size, Endian.little);
+    // Owned by the app window, the dialog is modal to it (as NSSavePanel is
+    // to its window): it stays on top, and the window cannot be clicked while
+    // Dart is blocked inside this call and unable to repaint it.
+    bd.setInt64(_oOwner, windowHandle(), Endian.little);
     bd.setInt64(_oFilter, filter.address, Endian.little);
     bd.setUint32(_oFilterIndex, 1, Endian.little);
     bd.setInt64(_oFile, fileBuf.address, Endian.little);
@@ -101,6 +112,8 @@ void _writeUtf16(Pointer<Uint8> dest, String value) {
 ///
 /// Returns `null` when the user cancels. Throws when the write fails so the
 /// caller can report it instead of flashing a false "Saved!".
+///
+/// [content] is CSV; the file gets the `sep=,` line ([csvFileContents]).
 Future<String?> saveTextFile({
   required String suggestedName,
   required String content,
@@ -108,6 +121,13 @@ Future<String?> saveTextFile({
 }) async {
   final path = saveFileDialog(suggestedName: suggestedName, title: title);
   if (path == null) return null;
-  await File(path).writeAsString(content);
+  try {
+    await File(path).writeAsString(csvFileContents(content));
+  } on FileSystemException catch (e) {
+    throw SaveFailure(
+      path.split(r'\').last,
+      SaveFailure.reasonFor(e.osError?.errorCode),
+    );
+  }
   return path;
 }

@@ -2,13 +2,12 @@
 /// ported from `HostTableHeader` / `HostTableRow` in `PingInfoView.swift`.
 library;
 
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models.dart';
 import '../theme.dart';
+import '../view_model.dart';
 
 /// Column geometry, copied verbatim from the `Col` enum in the Swift source.
 class Col {
@@ -22,22 +21,20 @@ class Col {
   static const double rate = 64;
   static const double hPad = 14;
   static const double rowH = 32;
-  static const double headerH = 28;
+  static const double headerH = 26;
 }
 
 class HostTable extends StatefulWidget {
   const HostTable({super.key, required this.hosts, required this.vm});
 
   final List<PingHost> hosts;
-  final dynamic vm;
+  final PingViewModel vm;
 
   @override
   State<HostTable> createState() => _HostTableState();
 }
 
 class _HostTableState extends State<HostTable> {
-  int _hover = -1;
-
   @override
   Widget build(BuildContext context) {
     final Palette p = context.palette;
@@ -56,15 +53,12 @@ class _HostTableState extends State<HostTable> {
                     itemExtent: Col.rowH,
                     itemBuilder: (BuildContext context, int index) {
                       final host = widget.hosts[index];
-                      return MouseRegion(
-                        onEnter: (_) => setState(() => _hover = index),
-                        onExit: (_) => setState(() => _hover = -1),
-                        child: _HostRow(
-                          host: host,
-                          isSelected: widget.vm.selectedIDs.contains(host.id),
-                          isHovered: _hover == index,
-                          onTap: () => _select(host),
-                        ),
+                      return _HostRow(
+                        key: ValueKey<String>(host.id),
+                        host: host,
+                        isSelected: widget.vm.selectedIDs.contains(host.id),
+                        isEven: index.isEven,
+                        onTap: () => _select(host),
                       );
                     },
                   ),
@@ -93,21 +87,23 @@ class _TableHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final Palette p = context.palette;
     Widget h(String label, double width, Alignment align) => SizedBox(
-          width: width,
-          child: Align(
-            alignment: align,
-            child: Text(
-              label.toUpperCase(),
-              maxLines: 1,
-              style: AppText.columnHeader.copyWith(color: p.secondary),
-            ),
-          ),
-        );
+      width: width,
+      child: Align(
+        alignment: align,
+        child: Text(
+          label.toUpperCase(),
+          maxLines: 1,
+          style: AppText.columnHeader.copyWith(color: p.secondary),
+        ),
+      ),
+    );
 
+    // `controlBackgroundColor`, like the rows: the macOS header is part of the
+    // table surface, not a separate bar.
     return Container(
       height: Col.headerH,
       decoration: BoxDecoration(
-        color: p.bar,
+        color: p.content,
         border: Border(bottom: BorderSide(color: p.separator, width: 1)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: Col.hPad),
@@ -128,140 +124,150 @@ class _TableHeader extends StatelessWidget {
   }
 }
 
-class _HostRow extends StatelessWidget {
+class _HostRow extends StatefulWidget {
   const _HostRow({
+    super.key,
     required this.host,
     required this.isSelected,
-    required this.isHovered,
+    required this.isEven,
     required this.onTap,
   });
 
   final PingHost host;
   final bool isSelected;
-  final bool isHovered;
+  final bool isEven;
   final VoidCallback onTap;
+
+  @override
+  State<_HostRow> createState() => _HostRowState();
+}
+
+/// Hover lives in the row itself: tracking it as an index on the table
+/// rebuilt every row on each mouse move, and left a stale highlight on
+/// whichever host slid into that index after a removal.
+class _HostRowState extends State<_HostRow> {
+  bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
     final Palette p = context.palette;
+    final host = widget.host;
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: AnimatedBuilder(
-        animation: host,
-        builder: (BuildContext context, Widget? _) {
-          // Flat rows: a single background colour, so the table reads as one
-          // surface instead of alternating bands.
-          final Color base = p.content;
-          Color background = base;
-          if (isHovered) {
-            background = Color.alphaBlend(p.hover, background);
-          }
-          if (isSelected) {
-            background = Color.alphaBlend(p.selection, background);
-            if (isHovered) {
-              background = Color.alphaBlend(
-                p.accent.withValues(alpha: 0.08),
-                background,
-              );
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedBuilder(
+          animation: host,
+          builder: (BuildContext context, Widget? _) {
+            // Alternating bands, as `alternatingContentBackgroundColors`.
+            Color background = widget.isEven ? p.content : p.altRow;
+            if (widget.isSelected) {
+              background = Color.alphaBlend(p.selection, background);
+            } else if (_hover) {
+              background = Color.alphaBlend(p.hover, background);
             }
-          }
 
-          return Container(
-            height: Col.rowH,
-            decoration: BoxDecoration(
-              color: background,
-              border: Border(
-                bottom: BorderSide(
-                  color: p.separator.withValues(alpha: 0.4),
-                  width: 1,
+            return Container(
+              height: Col.rowH,
+              decoration: BoxDecoration(
+                color: background,
+                border: Border(
+                  bottom: BorderSide(
+                    // `Divider().opacity(0.4)`: 40% *of* the separator.
+                    // withValues(alpha: 0.4) set it to 40% white outright,
+                    // which drew a bright rule under every row.
+                    color: p.separator.withValues(alpha: p.separator.a * 0.4),
+                    width: 1,
+                  ),
                 ),
               ),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: Col.hPad),
-            child: Row(
-              children: <Widget>[
-                SizedBox(
-                  width: Col.dot,
-                  child: Center(child: StatusDot(status: host.status)),
-                ),
-                SizedBox(
-                  width: Col.host,
-                  child: Text(
-                    host.address,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppText.mono.copyWith(color: p.text),
+              padding: const EdgeInsets.symmetric(horizontal: Col.hPad),
+              child: Row(
+                children: <Widget>[
+                  SizedBox(
+                    width: Col.dot,
+                    child: Center(child: StatusDot(status: host.status)),
                   ),
-                ),
-                SizedBox(
-                  width: Col.ip,
-                  child: Text(
-                    host.resolvedText,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppText.monoSmall.copyWith(color: p.secondary),
-                  ),
-                ),
-                SizedBox(
-                  width: Col.status,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: _StatusBadge(status: host.status),
-                  ),
-                ),
-                SizedBox(
-                  width: Col.latency,
-                  child: Text(
-                    host.latencyText,
-                    textAlign: TextAlign.right,
-                    maxLines: 1,
-                    style: AppText.monoSmall.copyWith(
-                      color: host.latency == null
-                          ? p.tertiary
-                          : p.latencyColor(host.latency!),
+                  SizedBox(
+                    width: Col.host,
+                    child: Text(
+                      host.address,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.mono.copyWith(color: p.text),
                     ),
                   ),
-                ),
-                SizedBox(
-                  width: Col.success,
-                  child: Text(
-                    '${host.successCount}',
-                    textAlign: TextAlign.right,
-                    maxLines: 1,
-                    style: AppText.monoSmall.copyWith(color: p.green),
-                  ),
-                ),
-                SizedBox(
-                  width: Col.failed,
-                  child: Text(
-                    '${host.failCount}',
-                    textAlign: TextAlign.right,
-                    maxLines: 1,
-                    style: AppText.monoSmall.copyWith(
-                      color: host.failCount > 0 ? p.red : p.secondary,
+                  SizedBox(
+                    width: Col.ip,
+                    child: Text(
+                      host.resolvedText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.monoSmall.copyWith(color: p.secondary),
                     ),
                   ),
-                ),
-                SizedBox(
-                  width: Col.rate,
-                  child: Text(
-                    host.rateText,
-                    textAlign: TextAlign.right,
-                    maxLines: 1,
-                    style: AppText.monoSmall.copyWith(
-                      color: host.successCount + host.failCount == 0
-                          ? p.secondary
-                          : p.rateColor(host.successRate),
+                  SizedBox(
+                    width: Col.status,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _StatusBadge(status: host.status),
                     ),
                   ),
-                ),
-                const Spacer(),
-              ],
-            ),
-          );
-        },
+                  SizedBox(
+                    width: Col.latency,
+                    child: Text(
+                      host.latencyText,
+                      textAlign: TextAlign.right,
+                      maxLines: 1,
+                      style: AppText.monoSmall.copyWith(
+                        color: host.latency == null
+                            ? p.tertiary
+                            : p.latencyColor(host.latency!),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: Col.success,
+                    child: Text(
+                      '${host.successCount}',
+                      textAlign: TextAlign.right,
+                      maxLines: 1,
+                      style: AppText.monoDigits.copyWith(color: p.green),
+                    ),
+                  ),
+                  SizedBox(
+                    width: Col.failed,
+                    child: Text(
+                      '${host.failCount}',
+                      textAlign: TextAlign.right,
+                      maxLines: 1,
+                      style: AppText.monoDigits.copyWith(
+                        color: host.failCount > 0 ? p.red : p.secondary,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: Col.rate,
+                    child: Text(
+                      host.rateText,
+                      textAlign: TextAlign.right,
+                      maxLines: 1,
+                      style: AppText.monoDigits.copyWith(
+                        color: host.successCount + host.failCount == 0
+                            ? p.tertiary
+                            : p.rateColor(host.successRate),
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -291,11 +297,11 @@ class _StatusBadge extends StatelessWidget {
 }
 
 PingStatusColor _statusColor(PingStatus status) => switch (status) {
-      PingStatus.idle => PingStatusColor.idle,
-      PingStatus.running => PingStatusColor.running,
-      PingStatus.success => PingStatusColor.success,
-      PingStatus.failed => PingStatusColor.failed,
-    };
+  PingStatus.idle => PingStatusColor.idle,
+  PingStatus.running => PingStatusColor.running,
+  PingStatus.success => PingStatusColor.success,
+  PingStatus.failed => PingStatusColor.failed,
+};
 
 /// The 9 px status dot. While running it grows a soft pulsing ring, matching
 /// the `repeatForever` animation on the Swift `StatusDot`.
@@ -400,112 +406,34 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final Palette p = context.palette;
 
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        return Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              SizedBox(
-                width: 72,
-                height: 64,
-                child: CustomPaint(painter: _SheepOutline(color: p.tertiary)),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                'No Hosts',
-                style: TextStyle(
-                  fontFamily: uiFontFamily,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  color: p.text,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Tap  +  in the toolbar to add an IP address or hostname.',
-                textAlign: TextAlign.center,
-                style: AppText.callout.copyWith(color: p.secondary),
-              ),
-            ],
-          ),
-        );
-      },
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            // The macOS `SheepOutline` template image, tinted `.tertiary`.
+            Image.asset(
+              'assets/images/sheep_outline.png',
+              width: 72,
+              height: 64,
+              fit: BoxFit.contain,
+              color: p.tertiary,
+              colorBlendMode: BlendMode.srcIn,
+              filterQuality: FilterQuality.medium,
+              excludeFromSemantics: true,
+            ),
+            const SizedBox(height: 14),
+            Text('No Hosts', style: AppText.title2.copyWith(color: p.text)),
+            const SizedBox(height: 6),
+            Text(
+              'Tap  +  in the toolbar to add an IP address or hostname.',
+              textAlign: TextAlign.center,
+              style: AppText.callout.copyWith(color: p.secondary),
+            ),
+          ],
+        ),
+      ),
     );
   }
-}
-
-/// A simplified sheep outline standing in for the original `SheepOutline`
-/// asset (the macOS bundle ships it as an image; drawing it keeps the port
-/// dependency-free and resolution independent).
-class _SheepOutline extends CustomPainter {
-  _SheepOutline({required this.color});
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint stroke = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..color = color;
-
-    final double w = size.width;
-    final double h = size.height;
-
-    // Fleecy body: overlapping circles unioned into one outline, so the inner
-    // arcs disappear and only the fluffy silhouette is stroked.
-    final Path body = Path();
-    const int bumps = 7;
-    for (int i = 0; i < bumps; i++) {
-      final double t = i / (bumps - 1);
-      final double cx = w * (0.22 + 0.50 * t);
-      final double cy = h * 0.60 - h * 0.10 * math.sin(t * math.pi);
-      body.addOval(
-        Rect.fromCircle(center: Offset(cx, cy), radius: w * 0.105),
-      );
-    }
-
-    // Head plus ear, overlapping the last bump so they merge with the body.
-    final Path head = Path()
-      ..addOval(
-        Rect.fromCenter(
-          center: Offset(w * 0.84, h * 0.47),
-          width: w * 0.24,
-          height: h * 0.30,
-        ),
-      )
-      ..addOval(
-        Rect.fromCenter(
-          center: Offset(w * 0.75, h * 0.33),
-          width: w * 0.17,
-          height: h * 0.10,
-        ),
-      );
-
-    canvas.drawPath(
-      Path.combine(PathOperation.union, body, head),
-      stroke,
-    );
-
-    // Legs.
-    for (final double x in <double>[0.33, 0.44, 0.56, 0.67]) {
-      canvas.drawLine(
-        Offset(w * x, h * 0.68),
-        Offset(w * x, h * 0.90),
-        stroke,
-      );
-    }
-
-    // Eye.
-    canvas.drawCircle(
-      Offset(w * 0.90, h * 0.44),
-      1.6,
-      Paint()..color = color,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_SheepOutline oldDelegate) => oldDelegate.color != color;
 }

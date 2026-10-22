@@ -12,11 +12,11 @@ enum PingStatus { idle, running, success, failed }
 
 extension PingStatusLabel on PingStatus {
   String get label => switch (this) {
-        PingStatus.idle => 'Idle',
-        PingStatus.running => '...',
-        PingStatus.success => 'OK',
-        PingStatus.failed => 'Fail',
-      };
+    PingStatus.idle => 'Idle',
+    PingStatus.running => '...',
+    PingStatus.success => 'OK',
+    PingStatus.failed => 'Fail',
+  };
 }
 
 /// A single logged packet.
@@ -68,7 +68,9 @@ class PingHost extends ChangeNotifier {
   String get latencyText {
     final ms = latency;
     if (ms == null) return '\u2014';
-    return ms < 1000 ? '${ms.toStringAsFixed(1)} ms' : '${ms.toStringAsFixed(0)} ms';
+    return ms < 1000
+        ? '${ms.toStringAsFixed(1)} ms'
+        : '${ms.toStringAsFixed(0)} ms';
   }
 
   String get rateText {
@@ -76,7 +78,11 @@ class PingHost extends ChangeNotifier {
     return '${successRate.toStringAsFixed(0)}%';
   }
 
-  void addLog({required bool isSuccess, double? latency, required String message}) {
+  void addLog({
+    required bool isSuccess,
+    double? latency,
+    required String message,
+  }) {
     log.insert(
       0,
       LogEntry(
@@ -95,7 +101,8 @@ class PingHost extends ChangeNotifier {
   void touch() => notifyListeners();
 
   /// Empties the packet log only; counters and status stay untouched.
-  void clearLog() {    if (log.isEmpty) return;
+  void clearLog() {
+    if (log.isEmpty) return;
     log.clear();
     notifyListeners();
   }
@@ -113,23 +120,30 @@ class PingHost extends ChangeNotifier {
   }
 
   /// Applies one packet result. Callers have already checked epoch/generation.
+  ///
+  /// [updateLiveState] is false for a result that was overtaken by a newer
+  /// one: it is still counted and logged, but must not roll the row's status
+  /// and latency back to an older packet.
   void applyResult({
     required bool isSuccess,
     required String resolvedIP,
     required double? latency,
     required String message,
+    bool updateLiveState = true,
   }) {
     if (isSuccess) {
-      if (this.resolvedIP.isEmpty && resolvedIP.isNotEmpty) this.resolvedIP = resolvedIP;
-      if (resolvedIP.isNotEmpty) this.resolvedIP = resolvedIP;
-      this.latency = latency;
-      status = PingStatus.success;
       successCount += 1;
     } else {
-      if (this.resolvedIP.isEmpty && resolvedIP.isNotEmpty) this.resolvedIP = resolvedIP;
-      this.latency = null;
-      status = PingStatus.failed;
       failCount += 1;
+    }
+    if (updateLiveState) {
+      if (resolvedIP.isNotEmpty && (isSuccess || this.resolvedIP.isEmpty)) {
+        this.resolvedIP = resolvedIP;
+      }
+      this.latency = isSuccess ? latency : null;
+      status = isSuccess ? PingStatus.success : PingStatus.failed;
+    } else if (this.resolvedIP.isEmpty && resolvedIP.isNotEmpty) {
+      this.resolvedIP = resolvedIP;
     }
     addLog(isSuccess: isSuccess, latency: latency, message: message);
   }

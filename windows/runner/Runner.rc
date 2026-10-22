@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "sheepping" "\0"
+            VALUE "CompanyName", "bestonehxh" "\0"
+            VALUE "FileDescription", "SheepPing" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "sheepping" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "sheepping.exe" "\0"
-            VALUE "ProductName", "sheepping" "\0"
+            VALUE "InternalName", "SheepPing" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 bestonehxh" "\0"
+            VALUE "OriginalFilename", "SheepPing.exe" "\0"
+            VALUE "ProductName", "SheepPing" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

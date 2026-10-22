@@ -1,4 +1,4 @@
-﻿/// Persistence for hosts, interval, timeout and theme.
+/// Persistence for hosts, interval, timeout and theme.
 ///
 /// The macOS build uses `UserDefaults`; the closest Windows equivalent that
 /// keeps the same data in one readable place is a JSON file under
@@ -8,14 +8,9 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
-
-
 class Settings {
-  Settings({
-    List<String>? hosts,
-    this.interval = 1.0,
-    this.timeout = 3.0,
-  }) : hosts = hosts ?? <String>[];
+  Settings({List<String>? hosts, this.interval = 1.0, this.timeout = 3.0})
+    : hosts = hosts ?? <String>[];
 
   final List<String> hosts;
   final double interval;
@@ -38,7 +33,11 @@ class SettingsStore {
     try {
       final f = file;
       if (!f.existsSync()) return Settings();
-      final raw = jsonDecode(f.readAsStringSync());
+      var text = f.readAsStringSync();
+      // A file saved by Notepad or PowerShell can start with a BOM, which
+      // jsonDecode rejects — that silently dropped every saved host.
+      if (text.startsWith('\uFEFF')) text = text.substring(1);
+      final raw = jsonDecode(text);
       if (raw is! Map) return Settings();
       final hosts = <String>[];
       final list = raw['hosts'];
@@ -69,7 +68,9 @@ class SettingsStore {
         'interval': settings.interval,
         'timeout': settings.timeout,
       };
-      file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(payload));
+      file.writeAsStringSync(
+        const JsonEncoder.withIndent('  ').convert(payload),
+      );
     } catch (_) {
       // Best effort: a failed write must not surface as a crash.
     }

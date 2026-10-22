@@ -68,11 +68,11 @@ class Palette {
   final Color chipFill;
 
   Color statusColor(PingStatusColor status) => switch (status) {
-        PingStatusColor.idle => secondary,
-        PingStatusColor.running => yellow,
-        PingStatusColor.success => green,
-        PingStatusColor.failed => red,
-      };
+    PingStatusColor.idle => secondary,
+    PingStatusColor.running => yellow,
+    PingStatusColor.success => green,
+    PingStatusColor.failed => red,
+  };
 
   Color latencyColor(double ms) {
     if (ms < 30) return green;
@@ -95,7 +95,7 @@ const Palette darkPalette = Palette(
   isDark: true,
   window: Color(0xFF2C2C2E),
   content: Color(0xFF1C1C1E),
-  altRow: Color(0xFF232326),
+  altRow: Color(0xFF242427),
   bar: Color(0xFF2C2C2E),
   barBorder: Color(0x1FFFFFFF),
   text: Color(0xFFF2F2F7),
@@ -135,12 +135,15 @@ const Palette lightPalette = Palette(
   chipFill: Color(0x14000000),
 );
 
-/// UI font: SF Pro's closest Windows stand-in.
-const String uiFontFamily = 'Segoe UI';
+/// UI font: Inter, bundled, is the closest free match for SF Pro — Segoe UI
+/// reads as "a Windows app" at a glance.
+const String uiFontFamily = 'Inter';
+const List<String> uiFallback = <String>['Segoe UI'];
 
-/// Monospaced font, mirroring `.system(design: .monospaced)`.
-const String monoFontFamily = 'Cascadia Mono';
-const List<String> monoFallback = <String>['Consolas', 'Courier New', 'monospace'];
+/// Monospaced font, mirroring `.system(design: .monospaced)` (SF Mono).
+/// Bundled so Windows 10, which lacks Cascadia, renders the same table.
+const String monoFontFamily = 'RobotoMono';
+const List<String> monoFallback = <String>['Cascadia Mono', 'Consolas'];
 
 extension PaletteContext on BuildContext {
   /// The active palette, derived from the resolved brightness.
@@ -148,58 +151,66 @@ extension PaletteContext on BuildContext {
       Theme.of(this).brightness == Brightness.dark ? darkPalette : lightPalette;
 }
 
-/// Text styles used across the painted widgets.
+/// Text styles used across the painted widgets, sized after the macOS text
+/// styles the original uses (body 13, callout 12, title3 15, title2 17).
 class AppText {
   const AppText._();
 
-  static const TextStyle title = TextStyle(
+  static const TextStyle _ui = TextStyle(
     fontFamily: uiFontFamily,
+    fontFamilyFallback: uiFallback,
+  );
+
+  static const TextStyle _mono = TextStyle(
+    fontFamily: monoFontFamily,
+    fontFamilyFallback: monoFallback,
+  );
+
+  /// `.title2.bold()` — sheet titles and the empty state.
+  static final TextStyle title2 = _ui.copyWith(
     fontSize: 17,
     fontWeight: FontWeight.w700,
     letterSpacing: -0.2,
   );
 
-  static const TextStyle body = TextStyle(fontFamily: uiFontFamily, fontSize: 13);
+  /// `.title3.monospacedDigit()` — the Settings values.
+  static final TextStyle title3 = _ui.copyWith(
+    fontSize: 15,
+    fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+  );
 
-  static const TextStyle bodyStrong = TextStyle(
-    fontFamily: uiFontFamily,
+  static final TextStyle body = _ui.copyWith(fontSize: 13);
+
+  static final TextStyle bodyStrong = _ui.copyWith(
     fontSize: 13,
     fontWeight: FontWeight.w600,
   );
 
-  static const TextStyle callout = TextStyle(fontFamily: uiFontFamily, fontSize: 12);
+  static final TextStyle callout = _ui.copyWith(fontSize: 12);
 
-  static const TextStyle caption = TextStyle(fontFamily: uiFontFamily, fontSize: 11);
+  static final TextStyle caption = _ui.copyWith(fontSize: 11);
 
-  static const TextStyle captionStrong = TextStyle(
-    fontFamily: uiFontFamily,
+  static final TextStyle captionStrong = _ui.copyWith(
     fontSize: 11,
     fontWeight: FontWeight.w600,
   );
 
   /// Uppercase column header (10 pt semibold).
-  static const TextStyle columnHeader = TextStyle(
-    fontFamily: uiFontFamily,
+  static final TextStyle columnHeader = _ui.copyWith(
     fontSize: 10,
     fontWeight: FontWeight.w600,
-    letterSpacing: 0.3,
+    letterSpacing: 0.4,
   );
 
-  static const TextStyle mono = TextStyle(
-    fontFamily: monoFontFamily,
-    fontFamilyFallback: monoFallback,
-    fontSize: 12.5,
-  );
+  /// `.system(.body, design: .monospaced)` — the host column.
+  static final TextStyle mono = _mono.copyWith(fontSize: 13);
 
-  static const TextStyle monoSmall = TextStyle(
-    fontFamily: monoFontFamily,
-    fontFamilyFallback: monoFallback,
-    fontSize: 11.5,
-  );
+  /// 12 pt mono — resolved IP and latency.
+  static final TextStyle monoSmall = _mono.copyWith(fontSize: 12);
 
-  static const TextStyle monoLog = TextStyle(
-    fontFamily: monoFontFamily,
-    fontFamilyFallback: monoFallback,
-    fontSize: 11,
-  );
+  /// 13 pt mono digits — success / failed / rate.
+  static final TextStyle monoDigits = _mono.copyWith(fontSize: 13);
+
+  /// 11 pt mono — the packet log.
+  static final TextStyle monoLog = _mono.copyWith(fontSize: 11);
 }

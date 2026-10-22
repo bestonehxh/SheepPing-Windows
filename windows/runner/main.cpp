@@ -17,6 +17,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+  // SheepPing is English-only. The Save dialog and other system UI otherwise
+  // follow the Windows display language, so ask for en-US resources for the
+  // whole process (and this thread) before any of it is created.
+  ULONG language_count = 1;
+  ::SetProcessPreferredUILanguages(MUI_LANGUAGE_NAME, L"en-US\0",
+                                   &language_count);
+  ::SetThreadUILanguage(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US));
+
   flutter::DartProject project(L"data");
 
   std::vector<std::string> command_line_arguments =

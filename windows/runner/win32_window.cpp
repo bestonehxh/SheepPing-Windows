@@ -18,13 +18,18 @@ namespace {
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 
-/// Registry key for app theme preference.
-///
-/// A value of 0 indicates apps should use dark mode. A non-zero or missing
-/// value indicates apps should use light mode.
-constexpr const wchar_t kGetPreferredBrightnessRegKey[] =
-  L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
-constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme";
+// Smallest window, in logical pixels — the macOS build's
+// `.frame(minWidth: 940, minHeight: 500)`.
+constexpr int kMinWidth = 940;
+constexpr int kMinHeight = 500;
+
+// Height of the resize border that the system would normally put above the
+// caption, for the window's current DPI.
+int TopFrameThickness(HWND hwnd) {
+  const UINT dpi = GetDpiForWindow(hwnd);
+  return GetSystemMetricsForDpi(SM_CYFRAME, dpi) +
+         GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+}
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
@@ -146,6 +151,11 @@ bool Win32Window::Create(const std::wstring& title,
 
   UpdateTheme(window);
 
+  // Re-run WM_NCCALCSIZE now that the handler below is in place, so the
+  // caption is gone before the first frame is shown.
+  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+
   return OnCreate();
 }
 
@@ -186,6 +196,33 @@ Win32Window::MessageHandler(HWND hwnd,
         PostQuitMessage(0);
       }
       return 0;
+
+    // The Flutter toolbar draws its own title bar, so the whole non-client
+    // area above the client goes: caption *and* the top resize border. Only
+    // stripping WS_CAPTION (as this used to) leaves that border behind as a
+    // dark band across the top of the window. Left/right/bottom keep their
+    // native resize frame; the top edge is resized from Flutter instead
+    // (see startResize in lib/src/win32_window.dart).
+    case WM_NCCALCSIZE: {
+      if (wparam == FALSE) break;
+      auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+      const LONG original_top = params->rgrc[0].top;
+      const LRESULT result = DefWindowProc(hwnd, message, wparam, lparam);
+      if (result != 0) return result;
+      params->rgrc[0].top = original_top;
+      // A maximized window hangs over the monitor edge by its frame width;
+      // without this the top of the toolbar would sit off screen.
+      if (IsZoomed(hwnd)) params->rgrc[0].top += TopFrameThickness(hwnd);
+      return 0;
+    }
+
+    case WM_GETMINMAXINFO: {
+      const double scale = GetDpiForWindow(hwnd) / 96.0;
+      auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+      info->ptMinTrackSize.x = Scale(kMinWidth, scale);
+      info->ptMinTrackSize.y = Scale(kMinHeight, scale);
+      return 0;
+    }
 
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
@@ -273,16 +310,9 @@ void Win32Window::OnDestroy() {
 }
 
 void Win32Window::UpdateTheme(HWND const window) {
-  DWORD light_mode;
-  DWORD light_mode_size = sizeof(light_mode);
-  LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
-                               kGetPreferredBrightnessRegValue,
-                               RRF_RT_REG_DWORD, nullptr, &light_mode,
-                               &light_mode_size);
-
-  if (result == ERROR_SUCCESS) {
-    BOOL enable_dark_mode = light_mode == 0;
-    DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                          &enable_dark_mode, sizeof(enable_dark_mode));
-  }
+  // SheepPing is night mode only, so the frame is dark whatever the system
+  // theme says; a light frame would outline the dark window in white.
+  BOOL enable_dark_mode = TRUE;
+  DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                        &enable_dark_mode, sizeof(enable_dark_mode));
 }

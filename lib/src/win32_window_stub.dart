@@ -6,7 +6,15 @@ const String kWindowTitle = 'SheepPing';
 
 void applyBorderless() {}
 
+const int htTop = 12;
+const int htTopLeft = 13;
+const int htTopRight = 14;
+
 void startDrag() {}
+
+void startResize(int hitTest) {}
+
+int windowHandle() => 0;
 
 void minimize() {}
 

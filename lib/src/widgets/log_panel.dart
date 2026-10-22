@@ -28,7 +28,14 @@ class LogSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final selected = vm.selectedHosts;
     if (selected.isEmpty) return const _Placeholder();
-    if (selected.length == 1) return _HostLogPanel(host: selected.first);
+    if (selected.length == 1) {
+      // Keyed by host: without it the State (and a pending "Copied!" or
+      // "Saved!" flash) carried over to the next host that was selected.
+      return _HostLogPanel(
+        key: ValueKey<String>(selected.first.id),
+        host: selected.first,
+      );
+    }
     return _MultiSelectionPanel(hosts: selected, allHosts: vm.hosts);
   }
 }
@@ -53,14 +60,18 @@ class _Placeholder extends StatelessWidget {
             ),
           ],
         ),
-        Expanded(child: ColoredBox(color: p.content)),
+        // A childless ColoredBox in a centre-aligned Column is laid out zero
+        // pixels wide, which left this pane showing the window colour.
+        Expanded(
+          child: ColoredBox(color: p.content, child: const SizedBox.expand()),
+        ),
       ],
     );
   }
 }
 
 class _HostLogPanel extends StatefulWidget {
-  const _HostLogPanel({required this.host});
+  const _HostLogPanel({super.key, required this.host});
 
   final PingHost host;
 
@@ -85,16 +96,17 @@ class _HostLogPanelState extends State<_HostLogPanel> {
 
   void _flash(void Function() set, void Function() clear, double seconds) {
     setState(set);
-    _timers.add(Timer(Duration(milliseconds: (seconds * 1000).round()), () {
-      if (mounted) setState(clear);
-    }));
+    _timers.add(
+      Timer(Duration(milliseconds: (seconds * 1000).round()), () {
+        if (mounted) setState(clear);
+      }),
+    );
   }
 
   Future<void> _save() async {
     final host = widget.host;
-    String? path;
     try {
-      path = await saveTextFile(
+      final path = await saveTextFile(
         suggestedName: 'ping-${safeFileName(host.address)}.csv',
         title: 'Save log as CSV',
         content: logCsv(host),
@@ -106,8 +118,12 @@ class _HostLogPanelState extends State<_HostLogPanel> {
       await showDialog<void>(
         context: context,
         builder: (BuildContext ctx) => AlertDialog(
-          title: const Text('Could not save the log'),
-          content: Text('$path\n\n$error'),
+          title: Text(
+            error is SaveFailure
+                ? "Couldn't save ${error.fileName}"
+                : "Couldn't save the log",
+          ),
+          content: Text(_saveErrorText(error)),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
@@ -166,7 +182,9 @@ class _HostLogPanelState extends State<_HostLogPanel> {
                     active: _copied,
                     tooltip: 'Copy log to clipboard',
                     onTap: () async {
-                      await Clipboard.setData(ClipboardData(text: logCsv(host)));
+                      await Clipboard.setData(
+                        ClipboardData(text: logCsv(host)),
+                      );
                       if (!mounted) return;
                       _flash(() => _copied = true, () => _copied = false, 1.5);
                     },
@@ -187,7 +205,11 @@ class _HostLogPanelState extends State<_HostLogPanel> {
                     tooltip: 'Clear log',
                     onTap: () {
                       host.clearLog();
-                      _flash(() => _cleared = true, () => _cleared = false, 1.2);
+                      _flash(
+                        () => _cleared = true,
+                        () => _cleared = false,
+                        1.2,
+                      );
                     },
                   ),
                 ],
@@ -248,7 +270,6 @@ class _MultiSelectionPanelState extends State<_MultiSelectionPanel> {
         content: combinedLogCsv(targets),
       );
       if (path == null || !mounted) return;
-      if (!mounted) return;
       setState(() {
         if (all) {
           _savedAll = true;
@@ -256,21 +277,27 @@ class _MultiSelectionPanelState extends State<_MultiSelectionPanel> {
           _savedSelection = true;
         }
       });
-      _timers.add(Timer(const Duration(milliseconds: 1500), () {
-        if (!mounted) return;
-        setState(() {
-          _savedAll = false;
-          _savedSelection = false;
-        });
-      }));
+      _timers.add(
+        Timer(const Duration(milliseconds: 1500), () {
+          if (!mounted) return;
+          setState(() {
+            _savedAll = false;
+            _savedSelection = false;
+          });
+        }),
+      );
     } catch (error) {
       // A read-only destination must not claim success; surface it instead.
       if (!mounted) return;
       await showDialog<void>(
         context: context,
         builder: (BuildContext ctx) => AlertDialog(
-          title: const Text('Could not save the log'),
-          content: Text('$error'),
+          title: Text(
+            error is SaveFailure
+                ? "Couldn't save ${error.fileName}"
+                : "Couldn't save the log",
+          ),
+          content: Text(_saveErrorText(error)),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
@@ -334,7 +361,9 @@ class _MultiSelectionPanelState extends State<_MultiSelectionPanel> {
                     decoration: BoxDecoration(
                       border: Border(
                         bottom: BorderSide(
-                          color: p.separator.withValues(alpha: 0.4),
+                          color: p.separator.withValues(
+                            alpha: p.separator.a * 0.4,
+                          ),
                           width: 1,
                         ),
                       ),
@@ -370,6 +399,11 @@ class _MultiSelectionPanelState extends State<_MultiSelectionPanel> {
     );
   }
 }
+
+/// The body of the save-failure alert. Anything that is not a [SaveFailure]
+/// carries OS text in the Windows display language, so it is not shown.
+String _saveErrorText(Object error) =>
+    error is SaveFailure ? error.reason : 'The file could not be written.';
 
 /// The `.bar` strip used at the top of every log mode.
 class _LogHeaderBar extends StatelessWidget {
@@ -465,7 +499,10 @@ class _LogActionButtonState extends State<_LogActionButton> {
                   Icon(widget.icon, size: 11, color: tint),
                   const SizedBox(width: 4),
                 ],
-                Text(widget.label, style: AppText.caption.copyWith(color: tint)),
+                Text(
+                  widget.label,
+                  style: AppText.caption.copyWith(color: tint),
+                ),
               ],
             ),
           ),
@@ -515,7 +552,9 @@ class _LogRow extends StatelessWidget {
           SizedBox(
             width: 76,
             child: Text(
-              ms == null ? '  timeout' : '${ms.toStringAsFixed(1).padLeft(6)} ms',
+              ms == null
+                  ? '  timeout'
+                  : '${ms.toStringAsFixed(1).padLeft(6)} ms',
               textAlign: TextAlign.right,
               style: AppText.monoLog.copyWith(
                 color: ms == null ? p.red : p.latencyColor(ms),

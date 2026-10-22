@@ -1,11 +1,12 @@
 /// Minimal Win32 window control through `dart:ffi`.
 ///
-/// The macOS app has a unified title bar with no system chrome. Recreating that
-/// on Windows needs four things, all of which live here:
-///   * drop the caption while keeping the resize frame,
-///   * round the corners (Windows 11),
+/// The macOS app has a unified title bar with no system chrome. The runner
+/// (`windows/runner/win32_window.cpp`, `WM_NCCALCSIZE`) removes the caption and
+/// the top resize border; the rest lives here:
+///   * round the corners and force the dark frame (Windows 11),
 ///   * start a native drag from Flutter (so a drag can begin on the custom bar
 ///     while ordinary clicks still reach the toolbar buttons),
+///   * resize from the top edge, which no longer has a native frame,
 ///   * minimise / maximise / close.
 ///
 /// `dart:ffi` is used instead of `window_manager` on purpose: plugins require
@@ -21,18 +22,15 @@ final DynamicLibrary _user32 = DynamicLibrary.open('user32.dll');
 final DynamicLibrary _kernel32 = DynamicLibrary.open('kernel32.dll');
 final DynamicLibrary _dwmapi = DynamicLibrary.open('dwmapi.dll');
 
-// window styles
-const int _gwlStyle = -16;
-const int _wsCaption = 0x00C00000;
-const int _swpNoSize = 0x0001;
-const int _swpNoMove = 0x0002;
-const int _swpNoZOrder = 0x0004;
-const int _swpFrameChanged = 0x0020;
-
 // messages / commands
 const int _wmClose = 0x0010;
 const int _wmNcLButtonDown = 0x00A1;
 const int _htCaption = 2;
+
+/// `WM_NCLBUTTONDOWN` hit-test codes for the edges the toolbar can resize.
+const int htTop = 12;
+const int htTopLeft = 13;
+const int htTopRight = 14;
 const int _swMinimize = 6;
 const int _swMaximize = 3;
 const int _swRestore = 9;
@@ -41,16 +39,6 @@ const int _dwmwaUseImmersiveDarkMode = 20;
 
 typedef _FindWindowWC = IntPtr Function(Pointer<Utf16>, Pointer<Utf16>);
 typedef _FindWindowWD = int Function(Pointer<Utf16>, Pointer<Utf16>);
-
-typedef _GetWindowLongPtrWC = IntPtr Function(IntPtr, Int32);
-typedef _GetWindowLongPtrWD = int Function(int, int);
-
-typedef _SetWindowLongPtrWC = IntPtr Function(IntPtr, Int32, IntPtr);
-typedef _SetWindowLongPtrWD = int Function(int, int, int);
-
-typedef _SetWindowPosC = Int32 Function(
-    IntPtr, IntPtr, Int32, Int32, Int32, Int32, Uint32);
-typedef _SetWindowPosD = int Function(int, int, int, int, int, int, int);
 
 typedef _ShowWindowC = Int32 Function(IntPtr, Int32);
 typedef _ShowWindowD = int Function(int, int);
@@ -78,39 +66,35 @@ typedef _DwmSetD = int Function(int, int, Pointer<Int32>, int);
 
 class _Api {
   _Api()
-      : _findWindow =
-            _user32.lookupFunction<_FindWindowWC, _FindWindowWD>('FindWindowW'),
-        _getWindowLongPtr =
-            _user32.lookupFunction<_GetWindowLongPtrWC, _GetWindowLongPtrWD>(
-                'GetWindowLongPtrW'),
-        _setWindowLongPtr =
-            _user32.lookupFunction<_SetWindowLongPtrWC, _SetWindowLongPtrWD>(
-                'SetWindowLongPtrW'),
-        _setWindowPos =
-            _user32.lookupFunction<_SetWindowPosC, _SetWindowPosD>('SetWindowPos'),
-        _showWindow =
-            _user32.lookupFunction<_ShowWindowC, _ShowWindowD>('ShowWindow'),
-        _isZoomed =
-            _user32.lookupFunction<_IsZoomedC, _IsZoomedD>('IsZoomed'),
-        _sendMessage =
-            _user32.lookupFunction<_SendMessageC, _SendMessageD>('SendMessageW'),
-        _postMessage =
-            _user32.lookupFunction<_PostMessageC, _PostMessageD>('PostMessageW'),
-        _releaseCapture = _user32
-            .lookupFunction<_ReleaseCaptureC, _ReleaseCaptureD>('ReleaseCapture'),
-        _getWindowThreadProcessId = _user32.lookupFunction<
+    : _findWindow = _user32.lookupFunction<_FindWindowWC, _FindWindowWD>(
+        'FindWindowW',
+      ),
+      _showWindow = _user32.lookupFunction<_ShowWindowC, _ShowWindowD>(
+        'ShowWindow',
+      ),
+      _isZoomed = _user32.lookupFunction<_IsZoomedC, _IsZoomedD>('IsZoomed'),
+      _sendMessage = _user32.lookupFunction<_SendMessageC, _SendMessageD>(
+        'SendMessageW',
+      ),
+      _postMessage = _user32.lookupFunction<_PostMessageC, _PostMessageD>(
+        'PostMessageW',
+      ),
+      _releaseCapture = _user32
+          .lookupFunction<_ReleaseCaptureC, _ReleaseCaptureD>('ReleaseCapture'),
+      _getWindowThreadProcessId = _user32
+          .lookupFunction<
             _GetWindowThreadProcessIdC,
-            _GetWindowThreadProcessIdD>('GetWindowThreadProcessId'),
-        _getCurrentProcessId = _kernel32
-            .lookupFunction<_GetCurrentProcessIdC, _GetCurrentProcessIdD>(
-                'GetCurrentProcessId'),
-        _dwmSetAttribute =
-            _dwmapi.lookupFunction<_DwmSetC, _DwmSetD>('DwmSetWindowAttribute');
+            _GetWindowThreadProcessIdD
+          >('GetWindowThreadProcessId'),
+      _getCurrentProcessId = _kernel32
+          .lookupFunction<_GetCurrentProcessIdC, _GetCurrentProcessIdD>(
+            'GetCurrentProcessId',
+          ),
+      _dwmSetAttribute = _dwmapi.lookupFunction<_DwmSetC, _DwmSetD>(
+        'DwmSetWindowAttribute',
+      );
 
   final _FindWindowWD _findWindow;
-  final _GetWindowLongPtrWD _getWindowLongPtr;
-  final _SetWindowLongPtrWD _setWindowLongPtr;
-  final _SetWindowPosD _setWindowPos;
   final _ShowWindowD _showWindow;
   final _IsZoomedD _isZoomed;
   final _SendMessageD _sendMessage;
@@ -151,18 +135,15 @@ int _findWindowHandle() {
   }
 }
 
-/// Removes the system caption and rounds the corners. Safe to call repeatedly.
+/// Rounds the corners and darkens the frame. Safe to call repeatedly.
 ///
-/// Called from `main()` before the first frame: the runner only shows the
-/// window once Flutter has painted, so the caption never appears.
+/// The caption itself is removed by the runner, not here: clearing
+/// `WS_CAPTION` from Dart left the top resize border behind as a dark band
+/// above the toolbar, and also cost the window Snap Layouts and the minimise
+/// animation.
 void applyBorderless() {
   final hwnd = _findWindowHandle();
   if (hwnd == 0) return;
-
-  final style = _w._getWindowLongPtr(hwnd, _gwlStyle);
-  _w._setWindowLongPtr(hwnd, _gwlStyle, style & ~_wsCaption);
-  _w._setWindowPos(hwnd, 0, 0, 0, 0, 0,
-      _swpNoMove | _swpNoSize | _swpNoZOrder | _swpFrameChanged);
 
   // DWMWCP_ROUND (2) — ignored on Windows 10 and earlier.
   final Pointer<Int32> corner = calloc<Int32>();
@@ -187,6 +168,18 @@ void startDrag() {
   _w._releaseCapture();
   _w._sendMessage(hwnd, _wmNcLButtonDown, _htCaption, 0);
 }
+
+/// Begins a native resize from [hitTest] (one of [htTop], [htTopLeft],
+/// [htTopRight]). Call on drag start over the matching edge strip.
+void startResize(int hitTest) {
+  final hwnd = _findWindowHandle();
+  if (hwnd == 0) return;
+  _w._releaseCapture();
+  _w._sendMessage(hwnd, _wmNcLButtonDown, hitTest, 0);
+}
+
+/// The top-level window handle, or 0. Used to own modal system dialogs.
+int windowHandle() => _findWindowHandle();
 
 void minimize() {
   final hwnd = _findWindowHandle();

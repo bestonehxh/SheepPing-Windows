@@ -14,7 +14,8 @@ class PingViewModel extends ChangeNotifier {
     _interval = saved.interval;
     _timeout = saved.timeout;
     for (final address in saved.hosts) {
-      final host = PingHost(address);
+      if (!isValidAddress(address.trim())) continue;
+      final host = PingHost(address.trim());
       hosts.add(host);
       if (_autoStart) _startSession(host);
     }
@@ -59,34 +60,64 @@ class PingViewModel extends ChangeNotifier {
 
   // MARK: - Hosts
 
+  /// ASCII hostnames, IPv4, IPv6 and an IPv6 zone suffix. The app is
+  /// English-only, so internationalized names are entered in their ASCII
+  /// (xn--) form.
+  static final RegExp _hostPattern = RegExp(r'^[A-Za-z0-9._:%-]+$');
+
+  /// Whether [address] can be handed to ping.exe as a target.
+  ///
+  /// ping.exe takes options with *either* "-" or "/", so "/t" or "-t" would
+  /// become a flag rather than a host — "/t" pings forever, and a new one of
+  /// those would be spawned every tick. Spaces and shell punctuation never
+  /// belong in a host either.
+  static bool isValidAddress(String address) =>
+      address.isNotEmpty &&
+      !address.startsWith('-') &&
+      _hostPattern.hasMatch(address);
+
   /// Returns true when the address was actually added.
   bool addHost(String rawAddress) {
+    final added = _insert(rawAddress);
+    if (added) {
+      _save();
+      notifyListeners();
+    }
+    return added;
+  }
+
+  /// Adds every address in [list] and saves once. Returns how many were new.
+  int addHosts(Iterable<String> list) {
+    var count = 0;
+    for (final address in list) {
+      if (_insert(address)) count += 1;
+    }
+    if (count > 0) {
+      _save();
+      notifyListeners();
+    }
+    return count;
+  }
+
+  bool _insert(String rawAddress) {
     final address = rawAddress.trim();
-    // A leading "-" would be handed to ping.exe as a flag, so reject it.
-    if (address.isEmpty || address.startsWith('-')) return false;
+    if (!isValidAddress(address)) return false;
     for (final h in hosts) {
       if (h.address.toLowerCase() == address.toLowerCase()) return false;
     }
     final host = PingHost(address);
     hosts.add(host);
     _startSession(host);
-    _save();
-    notifyListeners();
     return true;
   }
 
-  void removeHost(PingHost host) {
-    _sessions.remove(host.id)?.stop();
-    selectedIDs.remove(host.id);
-    hosts.removeWhere((h) => h.id == host.id);
-    _save();
-    notifyListeners();
-  }
+  void removeHost(PingHost host) => removeHosts(<PingHost>[host]);
 
   void removeHosts(Iterable<PingHost> list) {
     for (final host in list.toList(growable: false)) {
       _sessions.remove(host.id)?.stop();
       selectedIDs.remove(host.id);
+      if (anchorID == host.id) anchorID = null;
       hosts.removeWhere((h) => h.id == host.id);
     }
     _save();
@@ -150,7 +181,11 @@ class PingViewModel extends ChangeNotifier {
 
   void _startSession(PingHost host) {
     if (!_autoStart) return;
-    final session = PingSession(host: host, interval: _interval, timeout: _timeout);
+    final session = PingSession(
+      host: host,
+      interval: _interval,
+      timeout: _timeout,
+    );
     _sessions[host.id] = session;
     session.start();
   }
@@ -213,10 +248,12 @@ class PingViewModel extends ChangeNotifier {
   void refresh() => notifyListeners();
 
   void _save() {
-    SettingsStore.save(Settings(
-      hosts: hosts.map((h) => h.address).toList(growable: false),
-      interval: _interval,
-      timeout: _timeout,
-    ));
+    SettingsStore.save(
+      Settings(
+        hosts: hosts.map((h) => h.address).toList(growable: false),
+        interval: _interval,
+        timeout: _timeout,
+      ),
+    );
   }
 }

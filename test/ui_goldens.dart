@@ -1,8 +1,8 @@
-﻿/// Renders the real widget tree at the target window size so the UI can be
+/// Renders the real widget tree at the target window size so the UI can be
 /// reviewed as an image without a Windows toolchain.
 ///
 /// Run with:
-///   flutter test test/ui_golden_test.dart --update-goldens
+///   flutter test test/ui_goldens.dart --update-goldens
 ///
 /// The PNGs land in `test/goldens/`. They are review artefacts, not assertions:
 /// nothing here fails on a machine without the Windows fonts, because missing
@@ -18,27 +18,38 @@ import 'package:sheepping/main.dart';
 import 'package:sheepping/src/models.dart';
 import 'package:sheepping/src/view_model.dart';
 
-const List<List<String>> _fonts = <List<String>>[
-  <String>['Segoe UI', r'C:\Windows\Fonts\segoeui.ttf'],
-  <String>['Segoe UI', r'C:\Windows\Fonts\segoeuib.ttf'],
-  <String>['Segoe UI', r'C:\Windows\Fonts\segoeuisl.ttf'],
-  <String>['Cascadia Mono', r'C:\Windows\Fonts\CascadiaMono.ttf'],
-  <String>['Cascadia Mono', r'C:\Windows\Fonts\consola.ttf'],
-  <String>['Consolas', r'C:\Windows\Fonts\consola.ttf'],
-  <String>[
-    'MaterialIcons',
-    r'C:\Users\bestchaan\flutter\bin\cache\artifacts\material_fonts\MaterialIcons-Regular.otf',
-  ],
-];
+List<List<String>> get _fonts {
+  final flutterRoot = Platform.environment['FLUTTER_ROOT'] ?? r'C:\flutter';
+  return <List<String>>[
+    // Bundled with the app (pubspec.yaml) — test runs do not load these.
+    <String>['Inter', 'assets/fonts/inter/inter-v20-latin-regular.ttf'],
+    <String>['Inter', 'assets/fonts/inter/inter-v20-latin-500.ttf'],
+    <String>['Inter', 'assets/fonts/inter/inter-v20-latin-600.ttf'],
+    <String>['Inter', 'assets/fonts/inter/inter-v20-latin-700.ttf'],
+    <String>[
+      'RobotoMono',
+      'assets/fonts/roboto/roboto-mono-v31-latin-regular.ttf',
+    ],
+    <String>['RobotoMono', 'assets/fonts/roboto/roboto-mono-v31-latin-500.ttf'],
+    // System fonts the app falls back to / draws caption glyphs with.
+    <String>['Segoe UI', r'C:\Windows\Fonts\segoeui.ttf'],
+    <String>['Segoe Fluent Icons', r'C:\Windows\Fonts\SegoeIcons.ttf'],
+    <String>['Segoe MDL2 Assets', r'C:\Windows\Fonts\segmdl2.ttf'],
+    <String>[
+      'MaterialIcons',
+      '$flutterRoot\\bin\\cache\\artifacts\\material_fonts\\MaterialIcons-Regular.otf',
+    ],
+  ];
+}
 
 Future<void> _loadFonts() async {
   for (final entry in _fonts) {
     final file = File(entry[1]);
     if (!file.existsSync()) continue;
     final loader = FontLoader(entry[0])
-      ..addFont(Future<ByteData>.value(
-        ByteData.sublistView(file.readAsBytesSync()),
-      ));
+      ..addFont(
+        Future<ByteData>.value(ByteData.sublistView(file.readAsBytesSync())),
+      );
     await loader.load();
   }
 }
@@ -75,22 +86,22 @@ PingViewModel _demoModel() {
     ..failCount = 4
     ..isActive = true;
 
-  good.addLog(
-    isSuccess: true,
-    latency: 0.2,
-    message: 'Reply from 8.8.8.8: bytes=32 time<1ms TTL=118',
+  // Fixed timestamps: with DateTime.now() every run drew a different clock
+  // into the log pane and the golden comparison could never pass.
+  LogEntry at(int second, double? ms, String message) => LogEntry(
+    timestamp: DateTime(2026, 1, 1, 9, 41, second),
+    isSuccess: ms != null,
+    latency: ms,
+    message: message,
   );
-  good.addLog(
-    isSuccess: true,
-    latency: 0.1,
-    message: 'Reply from 8.8.8.8: bytes=32 time<1ms TTL=118',
+  good.log.addAll(<LogEntry>[
+    at(1, 0.2, 'Reply from 8.8.8.8: bytes=32 time<1ms TTL=118'),
+    at(0, 0.1, 'Reply from 8.8.8.8: bytes=32 time<1ms TTL=118'),
+  ]);
+  named.log.add(
+    at(0, 24.0, 'Reply from 142.250.66.110: bytes=32 time=24ms TTL=117'),
   );
-  named.addLog(
-    isSuccess: true,
-    latency: 24.0,
-    message: 'Reply from 142.250.66.110: bytes=32 time=24ms TTL=117',
-  );
-  down.addLog(isSuccess: false, message: 'Request timed out.');
+  down.log.add(at(0, null, 'Request timed out.'));
 
   vm.hosts.addAll(<PingHost>[good, named, v6, down]);
   vm.selectSingle(good);
@@ -138,7 +149,7 @@ void main() {
     await tester.pumpWidget(SheepPingApp(vm: _demoModel()));
     await tester.pump(const Duration(milliseconds: 250));
 
-    await tester.tap(find.byIcon(Icons.tune));
+    await tester.tap(find.byIcon(Icons.tune_rounded));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
@@ -153,7 +164,7 @@ void main() {
     await tester.pumpWidget(SheepPingApp(vm: _demoModel()));
     await tester.pump(const Duration(milliseconds: 250));
 
-    await tester.tap(find.byIcon(Icons.add));
+    await tester.tap(find.byIcon(Icons.add_rounded));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 

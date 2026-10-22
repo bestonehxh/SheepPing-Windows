@@ -66,6 +66,40 @@ String combinedLogCsv(List<PingHost> hosts) {
   return lines.join('\n');
 }
 
+/// A CSV that could not be written, explained in the app's own (English)
+/// words: the OS error text is in the Windows display language.
+class SaveFailure implements Exception {
+  const SaveFailure(this.fileName, this.reason);
+
+  final String fileName;
+  final String reason;
+
+  /// Plain-English reason for a Win32 error code from a failed write.
+  static String reasonFor(int? code) => switch (code) {
+    2 || 3 => 'The folder no longer exists.',
+    5 => 'Access is denied. Choose a folder you can write to.',
+    19 => 'The disk is write-protected.',
+    32 || 33 => 'The file is open in another program. Close it and try again.',
+    39 || 112 => 'There is not enough space on the disk.',
+    null => 'The file could not be written.',
+    _ => 'The file could not be written (Windows error $code).',
+  };
+
+  @override
+  String toString() => "Couldn't save $fileName. $reason";
+}
+
+/// What a saved CSV file holds: [csv] behind a `sep=,` line.
+///
+/// Excel splits a CSV on the *regional* list separator, which is ";" wherever
+/// "," is the decimal mark (most of Europe) — there every row landed in one
+/// column. The `sep=` line pins the separator to "," on any region. It is for
+/// files only: pasted into a sheet from the clipboard it would be a data row.
+///
+/// No UTF-8 BOM: with one in front, Excel shows the `sep=` line as text
+/// instead of obeying it — and every value the app writes is ASCII anyway.
+String csvFileContents(String csv) => 'sep=,\n$csv';
+
 /// Turns a host address into something safe for a file name, matching
 /// `address.replacingOccurrences(of: "/", with: "-")`.
 String safeFileName(String address) {

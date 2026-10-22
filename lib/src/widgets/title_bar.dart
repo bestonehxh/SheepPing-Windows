@@ -1,16 +1,18 @@
-/// The unified title bar: window title on the left, the macOS-style segmented
-/// toolbar group on the right. Mirrors `buildToolbar()` from `PingInfoView.swift`
-/// (a `ToolbarItemGroup(placement: .primaryAction)` renders exactly like this on
-/// macOS: icon-only buttons, right aligned, inside one rounded group).
+/// The unified title bar: window title on the left, the toolbar on the right.
+/// Mirrors `buildToolbar()` from `PingInfoView.swift`.
+///
+/// On macOS 26 a `ToolbarItemGroup` renders each run of buttons between two
+/// `Divider()`s as its own glass capsule, so the bar reads
+/// `[+ −]  [■ ▶ ↻]  (● N active)  [⚙]`. The window controls on the far right
+/// stay Windows-native (Windows 11 caption buttons), by request.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
-import '../win32_window_stub.dart'
-    if (dart.library.ffi) '../win32_window.dart';
+import '../win32_window_stub.dart' if (dart.library.ffi) '../win32_window.dart';
 
-class TitleBar extends StatelessWidget {
+class TitleBar extends StatefulWidget {
   const TitleBar({
     super.key,
     required this.anyActive,
@@ -39,7 +41,211 @@ class TitleBar extends StatelessWidget {
   final VoidCallback onRestart;
   final VoidCallback onSettings;
 
+  /// The macOS unified toolbar height.
   static const double height = 52;
+
+  @override
+  State<TitleBar> createState() => _TitleBarState();
+}
+
+class _TitleBarState extends State<TitleBar> with WidgetsBindingObserver {
+  bool _maximized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _maximized = isMaximized();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Maximise/restore always resizes the view, so this keeps the caption
+  /// glyph and the top resize strip in step with the window state.
+  @override
+  void didChangeMetrics() {
+    final bool now = isMaximized();
+    if (now != _maximized) setState(() => _maximized = now);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Palette p = context.palette;
+
+    final Widget bar = Container(
+      height: TitleBar.height,
+      decoration: BoxDecoration(
+        color: p.window,
+        border: Border(bottom: BorderSide(color: p.separator, width: 1)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          // The title and all the empty space around it move the window.
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanStart: (_) => startDrag(),
+              onDoubleTap: toggleMaximize,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 18),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'SheepPing',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.bodyStrong.copyWith(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: p.text,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Center(child: _toolbar(p)),
+          const SizedBox(width: 14),
+          Align(
+            alignment: Alignment.topCenter,
+            child: _WindowButtons(maximized: _maximized),
+          ),
+        ],
+      ),
+    );
+
+    if (_maximized) return bar;
+
+    // The runner removed the native top border, so resizing from the top edge
+    // is picked up here: a thin strip across the top, and its two corners.
+    return Stack(
+      children: <Widget>[
+        bar,
+        const Positioned(
+          left: 0,
+          right: 0,
+          top: 0,
+          height: _resizeStrip,
+          child: _ResizeEdge(
+            hitTest: htTop,
+            cursor: SystemMouseCursors.resizeUpDown,
+          ),
+        ),
+        const Positioned(
+          left: 0,
+          top: 0,
+          width: _resizeCorner,
+          height: _resizeCorner,
+          child: _ResizeEdge(
+            hitTest: htTopLeft,
+            cursor: SystemMouseCursors.resizeUpLeftDownRight,
+          ),
+        ),
+        const Positioned(
+          right: 0,
+          top: 0,
+          width: _resizeCorner,
+          height: _resizeCorner,
+          child: _ResizeEdge(
+            hitTest: htTopRight,
+            cursor: SystemMouseCursors.resizeUpRightDownLeft,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _toolbar(Palette p) {
+    final w = widget;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        _Capsule(
+          children: <Widget>[
+            _BarButton(
+              icon: Icons.add_rounded,
+              tooltip: 'Add a new host to monitor',
+              onPressed: w.onAdd,
+            ),
+            _BarButton(
+              icon: Icons.remove_rounded,
+              tooltip: 'Remove selected host(s) (Delete)',
+              onPressed: w.hasSelection ? w.onRemove : null,
+            ),
+          ],
+        ),
+        const SizedBox(width: 8),
+        _Capsule(
+          children: <Widget>[
+            _BarButton(
+              icon: Icons.stop_rounded,
+              tooltip: 'Stop all active pings',
+              onPressed: w.anyActive ? w.onStopAll : null,
+            ),
+            _BarButton(
+              icon: Icons.play_arrow_rounded,
+              tooltip: 'Resume stopped hosts',
+              onPressed: w.anyInactive ? w.onResume : null,
+            ),
+            _BarButton(
+              icon: Icons.refresh_rounded,
+              tooltip: 'Clear stats and restart all hosts',
+              onPressed: w.hasHosts ? w.onRestart : null,
+            ),
+          ],
+        ),
+        if (w.hasHosts) ...<Widget>[
+          const SizedBox(width: 8),
+          _StatusChip(active: w.anyActive, count: w.sessionCount),
+        ],
+        const SizedBox(width: 8),
+        _Capsule(
+          children: <Widget>[
+            _BarButton(
+              icon: Icons.tune_rounded,
+              tooltip: 'Ping interval and other settings',
+              onPressed: w.onSettings,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+const double _resizeStrip = 5;
+const double _resizeCorner = 10;
+
+class _ResizeEdge extends StatelessWidget {
+  const _ResizeEdge({required this.hitTest, required this.cursor});
+
+  final int hitTest;
+  final MouseCursor cursor;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: cursor,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanStart: (_) => startResize(hitTest),
+      ),
+    );
+  }
+}
+
+/// One glass capsule of toolbar buttons.
+class _Capsule extends StatelessWidget {
+  const _Capsule({required this.children});
+
+  final List<Widget> children;
+
+  static const double height = 34;
 
   @override
   Widget build(BuildContext context) {
@@ -47,136 +253,20 @@ class TitleBar extends StatelessWidget {
 
     return Container(
       height: height,
-      decoration: BoxDecoration(
-        color: p.window,
-        border: Border(bottom: BorderSide(color: p.separator, width: 1)),
-      ),
-      child: Row(
-        children: <Widget>[
-          // Draggable region covers the empty space to the left of the groups.
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onPanStart: (_) => startDrag(),
-              onDoubleTap: toggleMaximize,
-              child: const SizedBox.expand(),
-            ),
-          ),
-          _ToolbarGroup(
-            anyActive: anyActive,
-            anyInactive: anyInactive,
-            sessionCount: sessionCount,
-            hasHosts: hasHosts,
-            hasSelection: hasSelection,
-            onAdd: onAdd,
-            onRemove: onRemove,
-            onStopAll: onStopAll,
-            onResume: onResume,
-            onRestart: onRestart,
-            onSettings: onSettings,
-          ),
-          const SizedBox(width: 8),
-          _WindowButtons(p: p),
-        ],
-      ),
-    );
-  }
-}
-
-class _ToolbarGroup extends StatelessWidget {
-  const _ToolbarGroup({
-    required this.anyActive,
-    required this.anyInactive,
-    required this.sessionCount,
-    required this.hasHosts,
-    required this.hasSelection,
-    required this.onAdd,
-    required this.onRemove,
-    required this.onStopAll,
-    required this.onResume,
-    required this.onRestart,
-    required this.onSettings,
-  });
-
-  final bool anyActive;
-  final bool anyInactive;
-  final int sessionCount;
-  final bool hasHosts;
-  final bool hasSelection;
-  final VoidCallback onAdd;
-  final VoidCallback onRemove;
-  final VoidCallback onStopAll;
-  final VoidCallback onResume;
-  final VoidCallback onRestart;
-  final VoidCallback onSettings;
-
-  @override
-  Widget build(BuildContext context) {
-    final Palette p = context.palette;
-
-    return Container(
-      height: 36,
       padding: const EdgeInsets.symmetric(horizontal: 3),
       decoration: BoxDecoration(
         color: p.groupFill,
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(height / 2),
         border: Border.all(color: p.barBorder, width: 1),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          _BarButton(
-            icon: Icons.add,
-            tooltip: 'Add a new host to monitor',
-            onPressed: onAdd,
-          ),
-          _BarButton(
-            icon: Icons.remove,
-            tooltip: 'Remove selected host(s) (Delete)',
-            onPressed: hasSelection ? onRemove : null,
-          ),
-          _Divider(p: p),
-          _BarButton(
-            icon: Icons.stop,
-            tooltip: 'Stop all active pings',
-            onPressed: anyActive ? onStopAll : null,
-          ),
-          _BarButton(
-            icon: Icons.play_arrow,
-            tooltip: 'Resume stopped hosts',
-            onPressed: anyInactive ? onResume : null,
-          ),
-          _BarButton(
-            icon: Icons.refresh,
-            tooltip: 'Clear stats and restart all hosts',
-            onPressed: hasHosts ? onRestart : null,
-          ),
-          if (hasHosts) ...<Widget>[
-            _Divider(p: p),
-            _StatusChip(active: anyActive, count: sessionCount),
-          ],
-          _BarButton(
-            icon: Icons.tune,
-            tooltip: 'Ping interval and other settings',
-            onPressed: onSettings,
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 6,
+            offset: const Offset(0, 1),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _Divider extends StatelessWidget {
-  const _Divider({required this.p});
-  final Palette p;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 18,
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-      color: p.separator,
+      child: Row(mainAxisSize: MainAxisSize.min, children: children),
     );
   }
 }
@@ -206,6 +296,13 @@ class _BarButtonState extends State<_BarButton> {
     final bool enabled = widget.onPressed != null;
     final Color color = enabled ? p.text : p.tertiary;
 
+    Color fill = Colors.transparent;
+    if (enabled && _down) {
+      fill = p.text.withValues(alpha: 0.16);
+    } else if (enabled && _hover) {
+      fill = p.text.withValues(alpha: 0.09);
+    }
+
     return Tooltip(
       message: widget.tooltip,
       waitDuration: const Duration(milliseconds: 600),
@@ -228,17 +325,13 @@ class _BarButtonState extends State<_BarButton> {
               : null,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 90),
-            width: 32,
+            width: 36,
             height: 28,
             decoration: BoxDecoration(
-              color: _down
-                  ? p.text.withValues(alpha: 0.14)
-                  : (_hover && enabled
-                      ? p.text.withValues(alpha: 0.08)
-                      : Colors.transparent),
-              borderRadius: BorderRadius.circular(6),
+              color: fill,
+              borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(widget.icon, size: 16, color: color),
+            child: Icon(widget.icon, size: 18, color: color),
           ),
         ),
       ),
@@ -246,6 +339,7 @@ class _BarButtonState extends State<_BarButton> {
   }
 }
 
+/// The live "● N active" capsule (`.regularMaterial` on macOS).
 class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.active, required this.count});
 
@@ -258,12 +352,12 @@ class _StatusChip extends StatelessWidget {
     final String text = active ? '$count active' : 'Stopped';
 
     return Container(
-      height: 22,
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
       decoration: BoxDecoration(
         color: p.chipFill,
-        borderRadius: BorderRadius.circular(11),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: p.barBorder, width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -284,31 +378,47 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
-/// The window controls sit flush against the right edge of the bar, drawn as
-/// plain caption buttons (no capsule) so they read like Windows' own minimise /
-/// maximise / close cluster.
+/// Windows 11 caption buttons: 46×32, flush with the top-right corner, glyphs
+/// from the system icon font, red close on hover.
 class _WindowButtons extends StatelessWidget {
-  const _WindowButtons({required this.p});
-  final Palette p;
+  const _WindowButtons({required this.maximized});
+
+  final bool maximized;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        _CaptionButton(icon: Icons.remove, p: p, onTap: minimize),
-        _CaptionButton(icon: Icons.crop_square, p: p, onTap: toggleMaximize),
-        _CaptionButton(icon: Icons.close, p: p, onTap: close),
+        const _CaptionButton(glyph: '', tooltip: 'Minimize', onTap: minimize),
+        _CaptionButton(
+          glyph: maximized ? '' : '',
+          tooltip: maximized ? 'Restore Down' : 'Maximize',
+          onTap: toggleMaximize,
+        ),
+        const _CaptionButton(
+          glyph: '',
+          tooltip: 'Close',
+          onTap: close,
+          isClose: true,
+        ),
       ],
     );
   }
 }
 
 class _CaptionButton extends StatefulWidget {
-  const _CaptionButton({required this.icon, required this.p, required this.onTap});
-  final IconData icon;
-  final Palette p;
+  const _CaptionButton({
+    required this.glyph,
+    required this.tooltip,
+    required this.onTap,
+    this.isClose = false,
+  });
+
+  final String glyph;
+  final String tooltip;
   final VoidCallback onTap;
+  final bool isClose;
 
   @override
   State<_CaptionButton> createState() => _CaptionButtonState();
@@ -316,33 +426,57 @@ class _CaptionButton extends StatefulWidget {
 
 class _CaptionButtonState extends State<_CaptionButton> {
   bool _hover = false;
+  bool _down = false;
+
+  static const Color _closeHover = Color(0xFFC42B1C);
+  static const Color _closeDown = Color(0xFFB22A1B);
 
   @override
   Widget build(BuildContext context) {
-    final bool isClose = widget.icon == Icons.close;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 90),
-          width: 34,
-          height: 30,
-          decoration: BoxDecoration(
-            color: _hover
-                ? (isClose
-                    ? widget.p.red.withValues(alpha: 0.85)
-                    : widget.p.text.withValues(alpha: 0.08))
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Icon(
-            widget.icon,
-            size: 13,
-            color: _hover && isClose ? Colors.white : widget.p.secondary,
+    final Palette p = context.palette;
+
+    Color fill = Colors.transparent;
+    Color ink = p.text.withValues(alpha: 0.85);
+    if (widget.isClose && (_hover || _down)) {
+      fill = _down ? _closeDown : _closeHover;
+      ink = Colors.white;
+    } else if (_down) {
+      fill = p.text.withValues(alpha: 0.04);
+    } else if (_hover) {
+      fill = p.text.withValues(alpha: 0.07);
+    }
+
+    return Tooltip(
+      message: widget.tooltip,
+      waitDuration: const Duration(milliseconds: 600),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() {
+          _hover = false;
+          _down = false;
+        }),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (_) => setState(() => _down = true),
+          onTapCancel: () => setState(() => _down = false),
+          onTapUp: (_) {
+            setState(() => _down = false);
+            widget.onTap();
+          },
+          child: Container(
+            width: 46,
+            height: 32,
+            color: fill,
+            alignment: Alignment.center,
+            child: Text(
+              widget.glyph,
+              style: TextStyle(
+                fontFamily: 'Segoe Fluent Icons',
+                fontFamilyFallback: const <String>['Segoe MDL2 Assets'],
+                fontSize: 10,
+                color: ink,
+              ),
+            ),
           ),
         ),
       ),
